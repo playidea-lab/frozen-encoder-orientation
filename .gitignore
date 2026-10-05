@@ -32,3 +32,4 @@ credentials.json
 .vscode/
 *.swp
 .DS_Store
+figures/out/

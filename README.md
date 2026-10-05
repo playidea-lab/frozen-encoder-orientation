@@ -120,7 +120,7 @@ Run from the repository root with `VQHPS_ROOT` and the other variables set. Trai
 | Batch-axis mask in the token head (logit change up to 1.006) | `scripts/eval/diag_batchmix.py` | `CKPT_BATCHMIX` = an as-received checkpoint |
 | Fig. 1, graphical abstract | `figures/make_system_fig.py`, `figures/make_ga.py` | `uv run python figures/make_system_fig.py` |
 
-The numbers printed by these scripts are collected in `results/*.csv` exactly as they appear in the paper (Fig. "factorial" and Fig. "rotblind" plot `results/tab_configs_2x2.csv` and `results/tab_rotation_injection.csv`).
+The numbers printed by these scripts are collected in `results/*.csv` exactly as they appear in the paper (Fig. "factorial" and Fig. "rotblind" plot `results/tab_configs_2x2.csv` and `results/tab_rotation_injection.csv`; regenerate both with `uv run python figures/make_figs.py`, output in `$FIG_DIR`, default `figures/out`).
 
 ### Notes on what was changed for release
 
