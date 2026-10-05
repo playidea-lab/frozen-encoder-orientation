@@ -1,0 +1,45 @@
+[project]
+name = "frozen-encoder-orientation"
+version = "0.1.0"
+description = "Code for 'Global Average Pooling Loses Orientation: Frozen Encoders in Token-Based Human Mesh Recovery'"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+# pytorch3d 휠이 cp311/linux 로만 검증됐다
+requires-python = "==3.11.*"
+dependencies = [
+    "torch==2.9.*",
+    "torchvision",
+    "albumentations>=1.3.1",
+    "fvcore",
+    "hydra-core>=1.3.2",
+    "iopath",
+    "loguru>=0.7.2",
+    "matplotlib>=3.7.1",
+    "numpy",
+    "omegaconf>=2.3.0",
+    "opencv-python>=4.7.0",
+    "pandas>=2.0.1",
+    "pyrender>=0.1.45",
+    "python-hostlist>=1.23.0",
+    "scipy",
+    "smplx>=0.1.28",
+    "tqdm",
+    "trimesh>=4.4.1",
+    "yacs",
+    # DINOv2 / CLIP probe (scripts/probe/probe_enc2.py)
+    "transformers",
+]
+# pytorch3d 는 PyPI 휠이 없다 — README 의 Environment 절대로 CUDA 빌드 휠을 따로 설치한다.
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv]
+package = false
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]

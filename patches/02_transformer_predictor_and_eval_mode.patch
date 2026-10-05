@@ -1,0 +1,28 @@
+diff --git a/vq_hps/model/mesh_regressor_dino/__init__.py b/vq_hps/model/mesh_regressor_dino/__init__.py
+index cac1398..78e6434 100755
+--- a/vq_hps/model/mesh_regressor_dino/__init__.py
++++ b/vq_hps/model/mesh_regressor_dino/__init__.py
+@@ -1,2 +1 @@
+-# from .mesh_predictor_transformer import MeshRegressor # 1
+-from .mesh_predictor_cnn import MeshRegressor # 2
++from .mesh_predictor_transformer import MeshRegressor
+diff --git a/vq_hps/train/train_mesh_regressor/train.py b/vq_hps/train/train_mesh_regressor/train.py
+index ec95dfc..ecb762b 100755
+--- a/vq_hps/train/train_mesh_regressor/train.py
++++ b/vq_hps/train/train_mesh_regressor/train.py
+@@ -197,6 +197,7 @@ class MeshRegressor_Train(Train):
+                 self.training_loader.sampler.set_epoch(i)
+                 self.validation_loader.sampler.set_epoch(i)
+             logger.info(f"Train {i}")
++            self.model.train()
+             for data in tqdm(self.training_loader):
+                 self.optimizer.zero_grad()
+                 with torch.no_grad():
+@@ -296,6 +297,7 @@ class MeshRegressor_Train(Train):
+                 save=f"{self.follow.path_samples_train}/{i}_reprojection.png",
+             )
+
++            self.model.eval()  # validation은 dropout 끄고 잰다 (test()와 동일)
+             with torch.no_grad():
+                 for data in tqdm(self.validation_loader):
+                     data["mesh_idx"] = self.vqvae_mesh.get_codebook_indices(

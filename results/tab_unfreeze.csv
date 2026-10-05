@@ -1,0 +1,4 @@
+range,val_pa_mpjpe_mm,train_pa_mpjpe_mm,gap_mm
+epoch_29_pre_decay,46.99,34.62,12.37
+epochs_30_45_const_lr,46.28,,
+epochs_46_59_post_decay,45.56,29.55,16.02

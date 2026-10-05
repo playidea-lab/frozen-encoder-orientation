@@ -1,0 +1,5 @@
+effect,at_level_of_other_factor,delta_pa_mpjpe_mm,delta_pve_mm
+token_fix,orientation_broken,-1.02,-2.5
+token_fix,orientation_fixed,-1.24,-2.1
+orientation_fix,token_broken,+0.12,-57.5
+orientation_fix,token_fixed,-0.10,-57.1

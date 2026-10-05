@@ -1,0 +1,12 @@
+theta_deg,axis,delta_pa_mpjpe_mm,delta_mpjpe_tokenhmr_mm,delta_mpjpe_hmr2_mm,delta_mpjpe_spin_mm
+1,random(16),0,0.26,0.28,0.27
+5,random(16),0,7.19,6.77,4.99
+10,random(16),0,25.53,23.75,17.61
+20,random(16),0,76.28,71.76,56.18
+45,random(16),0,219.64,211.09,176.43
+90,random(16),0,453.68,440.98,380.86
+180,random(16),0,668.05,651.93,570.06
+5,vertical,0,,0.61,
+10,vertical,0,,5.06,
+20,vertical,0,,22.46,
+45,vertical,0,,88.03,

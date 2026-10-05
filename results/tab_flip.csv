@@ -1,0 +1,4 @@
+encoder,cos_avgpool_centered,cos_grid_flipped_back,cos_grid_as_is,pred_diff_avgpool_head_deg,pred_diff_grid_head_deg,gt_diff_deg
+dinov3,0.980,0.893,0.486,48.9,67.1,67.9
+dinov2,0.975,0.844,0.281,30.8,65.9,67.9
+clip,0.971,0.726,0.185,6.1,67.5,67.9

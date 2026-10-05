@@ -1,0 +1,6 @@
+readout_configuration,pa_mpjpe_mm,pa_mpjpe_sd,pve_mm,pve_sd,n_seeds,split,note
+as_received,52.72,0.57,152.3,1.8,3,3DPW val (1/10 subset),mean of last 5 epochs of 30-epoch run; seed-0 = 53.01/152.1
+token_head_fix,51.99,,149.6,,1,3DPW val (1/10 subset),seed 0
+orientation_head_fix,53.13,,94.6,,1,3DPW val (1/10 subset),seed 0
+both_fixes,51.74,0.13,93.3,1.0,3,3DPW val (1/10 subset),seed-0 = 51.89/92.5
+both_fixes_4_blocks_unfrozen,45.56,,79.9,,1,3DPW val (1/10 subset),60 epochs; LR x0.1 at 45; mean over epochs 46-59

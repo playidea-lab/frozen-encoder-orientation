@@ -1,0 +1,1619 @@
+diff --git a/.gitignore b/.gitignore
+index ed41b46..e3110c9 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -4,4 +4,9 @@
+ /mesh_vq_vae
+ *__pycache__*
+ *.pyc
+-/checkpoint
+\ No newline at end of file
++/checkpoint
++*.pth
++.idea/
++CLAUDE.md
++LICENSE.md
++images/
+diff --git a/configs/config.yaml b/configs/config.yaml
+index 012b49b..638ed1b 100644
+--- a/configs/config.yaml
++++ b/configs/config.yaml
+@@ -28,7 +28,8 @@ modelconv:
+ regressor:
+   cfg: configs/transformer.txt
+   autoreg: True
+-  backbone: 'hrnet_w48'
++  backbone: 'dinov3_vitl16'
++#  backbone: 'hrnet_w48'
+   num_vertex: 54
+   
+ training_data:
+diff --git a/configs/full_train.txt b/configs/full_train.txt
+index 6b429db..ecabe45 100644
+--- a/configs/full_train.txt
++++ b/configs/full_train.txt
+@@ -1,4 +1,3 @@
+ datasets/coco/coco.npz
+-datasets/h36m_train/h36m_train.npz
+ datasets/mpi_inf_3dhp_train/mpi_inf_3dhp_train.npz
+ datasets/mpii/mpii.npz
+\ No newline at end of file
+diff --git a/configs/transformer.txt b/configs/transformer.txt
+index 12c03c4..17e5cc9 100644
+--- a/configs/transformer.txt
++++ b/configs/transformer.txt
+@@ -1,5 +1,5 @@
+ {
+-    "model_dim": 512,
++    "model_dim": 1024,
+     "dropout": 0.2,
+     "nhead": 8,
+     "feedforward_dim": 1024,
+diff --git a/fix_npz_paths.py b/fix_npz_paths.py
+new file mode 100644
+index 0000000..71385ce
+--- /dev/null
++++ b/fix_npz_paths.py
+@@ -0,0 +1,86 @@
++"""
++Script to fix image paths in .npz files
++Changes /media/playidealab/Data/6000ada_backup to /mnt/disk1/Data/6000ada_backup
++"""
++
++import numpy as np
++import os
++from pathlib import Path
++
++OLD_PATH = "/media/playidealab/Data/6000ada_backup"
++NEW_PATH = "/mnt/disk1/Data/6000ada_backup"
++
++def fix_npz_paths(npz_file):
++    """Fix image paths in a .npz file"""
++    print(f"\nProcessing: {npz_file}")
++
++    # Load the data
++    data = np.load(npz_file, allow_pickle=True)
++
++    # Check if imgname field exists
++    if 'imgname' not in data:
++        print(f"  No 'imgname' field found, skipping...")
++        return
++
++    # Get all fields
++    data_dict = {key: data[key] for key in data.keys()}
++
++    # Fix image paths
++    imgnames = data_dict['imgname']
++    fixed_count = 0
++
++    if isinstance(imgnames, np.ndarray):
++        new_imgnames = []
++        for imgname in imgnames:
++            if isinstance(imgname, (str, np.str_)):
++                imgname_str = str(imgname)
++                if imgname_str.startswith(OLD_PATH):
++                    new_imgname = imgname_str.replace(OLD_PATH, NEW_PATH, 1)
++                    new_imgnames.append(new_imgname)
++                    fixed_count += 1
++                else:
++                    new_imgnames.append(imgname_str)
++            else:
++                new_imgnames.append(imgname)
++
++        data_dict['imgname'] = np.array(new_imgnames)
++
++    print(f"  Total images: {len(imgnames)}")
++    print(f"  Paths fixed: {fixed_count}")
++
++    if fixed_count > 0:
++        # Create backup
++        backup_file = npz_file + ".backup"
++        if not os.path.exists(backup_file):
++            print(f"  Creating backup: {backup_file}")
++            os.rename(npz_file, backup_file)
++        else:
++            print(f"  Backup already exists, removing original...")
++            os.remove(npz_file)
++
++        # Save fixed data
++        print(f"  Saving fixed file...")
++        np.savez(npz_file, **data_dict)
++        print(f"  ✓ Successfully fixed and saved!")
++    else:
++        print(f"  No paths needed fixing.")
++
++def main():
++    # Find all .npz files in datasets directory
++    datasets_dir = Path("datasets")
++    npz_files = list(datasets_dir.rglob("*.npz"))
++
++    print(f"Found {len(npz_files)} .npz file(s)")
++    print("=" * 60)
++
++    for npz_file in npz_files:
++        try:
++            fix_npz_paths(str(npz_file))
++        except Exception as e:
++            print(f"  ✗ Error processing {npz_file}: {e}")
++
++    print("\n" + "=" * 60)
++    print("Done!")
++
++if __name__ == "__main__":
++    main()
+diff --git a/j_regressor_maker.py b/j_regressor_maker.py
+new file mode 100755
+index 0000000..f5aebab
+--- /dev/null
++++ b/j_regressor_maker.py
+@@ -0,0 +1,52 @@
++import numpy as np
++
++in_path = "body_models/smplh/female/model.npz"   # 또는 .pkl
++out_path = "body_models/J_regressor_24.npy"
++
++def load_model(path):
++    if path.endswith(".npz"):
++        return np.load(path, allow_pickle=True)
++    elif path.endswith(".pkl"):
++        import pickle
++        with open(path, "rb") as f:
++            return pickle.load(f, encoding="latin1")
++    else:
++        raise ValueError("Only .npz or .pkl are supported")
++
++data = load_model(in_path)
++
++# 2) 키 탐색: 배포본마다 키 이름이 조금씩 다름
++keys = list(getattr(data, "files", getattr(data, "keys", lambda: [])()) or [])
++if "J_regressor" in keys:
++    J = data["J_regressor"]
++elif "J_regressor_body25" in keys:   # 희귀 케이스 대비
++    J = data["J_regressor_body25"]
++else:
++    # pkl일 때 dict 구조로 들어있으면 이렇게 접근
++    J = data.get("J_regressor", None)
++    if J is None:
++        raise KeyError(f"'J_regressor' not found. Keys: {keys}")
++
++# 3) 희소행렬이면 밀집으로 변환
++toarray = getattr(J, "toarray", None)
++if callable(toarray):
++    J = J.toarray()
++
++J = np.asarray(J)
++n_joints = J.shape[0]
++print("loaded J_regressor shape:", J.shape)
++
++# 4) 행 수에 따라 처리
++if n_joints == 24:
++    J24 = J
++elif n_joints > 24:
++    # 보편적으로 앞 24개가 '몸 24조인트'
++    # (SMPL-H는 54행 -> 앞 24행이 몸, 나머지는 손가락)
++    # (SMPL-X는 얼굴/손 포함 -> 일반적으로 앞 24행이 몸)
++    J24 = J[:24]
++else:
++    raise ValueError(f"Unexpected J_regressor with {n_joints} joints (<24).")
++
++J24 = J24.astype(np.float32)
++np.save(out_path, J24)
++print("saved:", out_path, "shape:", J24.shape)
+\ No newline at end of file
+diff --git a/main.py b/main.py
+new file mode 100755
+index 0000000..38cd6a3
+--- /dev/null
++++ b/main.py
+@@ -0,0 +1,6 @@
++def main():
++    print("Hello from vq-hps!")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/preprocess_data/extract_mpi_inf_3dhp_frames.py b/preprocess_data/extract_mpi_inf_3dhp_frames.py
+new file mode 100755
+index 0000000..d302eda
+--- /dev/null
++++ b/preprocess_data/extract_mpi_inf_3dhp_frames.py
+@@ -0,0 +1,108 @@
++import os
++import cv2
++import numpy as np
++from tqdm import tqdm
++
++def extract_frames_from_video(video_path, output_dir):
++    """
++    Extract frames from video file and save as JPG images
++    """
++    # Create output directory
++    os.makedirs(output_dir, exist_ok=True)
++    
++    # Open video file
++    cap = cv2.VideoCapture(video_path)
++    
++    if not cap.isOpened():
++        print(f"Error: Could not open video {video_path}")
++        return False
++    
++    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
++    print(f"  Extracting {frame_count} frames from {os.path.basename(video_path)}")
++    
++    frame_idx = 0
++    success = True
++    
++    with tqdm(total=frame_count, desc=f"  {os.path.basename(video_path)}") as pbar:
++        while success:
++            success, frame = cap.read()
++            
++            if success:
++                # Save frame as JPG with 6-digit zero-padded filename
++                frame_filename = f"{frame_idx:06d}.jpg"
++                frame_path = os.path.join(output_dir, frame_filename)
++                cv2.imwrite(frame_path, frame)
++                frame_idx += 1
++                pbar.update(1)
++    
++    cap.release()
++    return True
++
++def process_mpi_inf_3dhp():
++    """
++    Process MPI-INF-3DHP dataset by extracting frames from videos
++    and organizing them in the expected directory structure
++    """
++    # Define source and destination directories
++    source_dir = 'datasets/mpi_inf_3dhp'
++    dest_dir = 'datasets/mpi_inf_3dhp_train'
++    
++    # Create the destination directory if it doesn't exist
++    os.makedirs(dest_dir, exist_ok=True)
++    
++    # Iterate over all subjects
++    for subject in ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8']:
++        subject_source = os.path.join(source_dir, subject)
++        subject_dest = os.path.join(dest_dir, subject)
++        
++        if os.path.exists(subject_source):
++            print(f"Processing {subject}")
++            
++            # Create subject directory in destination
++            os.makedirs(subject_dest, exist_ok=True)
++            
++            # Iterate over sequences
++            for seq in ['Seq1', 'Seq2']:
++                seq_source = os.path.join(subject_source, seq)
++                seq_dest = os.path.join(subject_dest, seq)
++                
++                if os.path.exists(seq_source):
++                    # Create sequence directory in destination
++                    os.makedirs(seq_dest, exist_ok=True)
++                    
++                    # Look for imageSequence directory
++                    image_seq_dir = os.path.join(seq_source, 'imageSequence')
++                    
++                    if os.path.exists(image_seq_dir):
++                        # Find all video files
++                        video_files = [f for f in os.listdir(image_seq_dir) if f.endswith('.avi')]
++                        video_files.sort()  # Sort to ensure consistent ordering
++                        
++                        for video_file in video_files:
++                            video_path = os.path.join(image_seq_dir, video_file)
++                            
++                            # Extract video number (e.g., 'video_0.avi' -> '0')
++                            video_name = os.path.splitext(video_file)[0]  # Remove .avi
++                            
++                            # Create video directory in destination (e.g., 'video_0')
++                            video_dest = os.path.join(seq_dest, video_name)
++                            
++                            print(f"  Processing {video_file}")
++                            
++                            # Extract frames from video
++                            if extract_frames_from_video(video_path, video_dest):
++                                print(f"    ✓ Frames extracted to {video_dest}")
++                            else:
++                                print(f"    ✗ Failed to extract frames from {video_file}")
++                    
++                    else:
++                        print(f"  imageSequence directory not found in {seq_source}")
++                else:
++                    print(f"  {seq} does not exist in {subject}")
++        else:
++            print(f"{subject} does not exist in source directory")
++    
++    print("Frame extraction completed!")
++
++if __name__ == "__main__":
++    process_mpi_inf_3dhp()
+\ No newline at end of file
+diff --git a/preprocess_data/extract_mpi_inf_3dhp_selective.py b/preprocess_data/extract_mpi_inf_3dhp_selective.py
+new file mode 100755
+index 0000000..bf71059
+--- /dev/null
++++ b/preprocess_data/extract_mpi_inf_3dhp_selective.py
+@@ -0,0 +1,174 @@
++import os
++import cv2
++import numpy as np
++from tqdm import tqdm
++
++def extract_specific_frames(video_path, output_dir, frame_indices):
++    """
++    Extract specific frames from video file based on frame indices
++    """
++    try:
++        # Create output directory
++        os.makedirs(output_dir, exist_ok=True)
++        
++        # Open video file
++        cap = cv2.VideoCapture(video_path)
++        
++        if not cap.isOpened():
++            print(f"Error: Could not open video {video_path}")
++            return False
++        
++        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
++        print(f"  Extracting {len(frame_indices)} frames from {os.path.basename(video_path)} (total: {frame_count})")
++        
++        # Sort frame indices for efficient extraction
++        sorted_indices = sorted(frame_indices)
++        
++        current_frame = 0
++        extracted_count = 0
++        
++        with tqdm(total=len(frame_indices), desc=f"  {os.path.basename(video_path)}") as pbar:
++            for target_frame in sorted_indices:
++                try:
++                    # Skip frames until we reach the target
++                    while current_frame < target_frame:
++                        ret = cap.read()
++                        if not ret[0]:
++                            break
++                        current_frame += 1
++                    
++                    # Read the target frame
++                    ret, frame = cap.read()
++                    if ret and frame is not None:
++                        # Save frame with 6-digit zero-padded filename (1-indexed)
++                        frame_filename = f"{target_frame+1:06d}.jpg"
++                        frame_path = os.path.join(output_dir, frame_filename)
++                        
++                        # Try to write the frame
++                        success = cv2.imwrite(frame_path, frame)
++                        if success:
++                            extracted_count += 1
++                            current_frame += 1
++                        else:
++                            print(f"    Warning: Could not write frame {target_frame} to {frame_path}")
++                    else:
++                        print(f"    Warning: Could not read frame {target_frame}")
++                        
++                    pbar.update(1)
++                    
++                except Exception as e:
++                    print(f"    Error processing frame {target_frame}: {str(e)}")
++                    pbar.update(1)
++                    continue
++        
++        cap.release()
++        print(f"    ✓ Extracted {extracted_count}/{len(frame_indices)} frames to {output_dir}")
++        return extracted_count > 0
++        
++    except Exception as e:
++        print(f"    ✗ Error processing video {video_path}: {str(e)}")
++        return False
++
++def process_mpi_inf_3dhp_selective():
++    """
++    Process MPI-INF-3DHP dataset by extracting only the frames specified in the annotation file
++    """
++    # Load annotation file to get required frame names
++    annotation_file = 'datasets/mpi_inf_3dhp/mpi_inf_3dhp_train.npz'
++    
++    if not os.path.exists(annotation_file):
++        print(f"Error: Annotation file not found: {annotation_file}")
++        return
++    
++    data = np.load(annotation_file)
++    imgnames = data['imgname']
++    
++    print(f"Found {len(imgnames)} annotated frames")
++    
++    # Group frame names by video
++    video_frames = {}
++    for imgname in imgnames:
++        # Parse path: S1/Seq1/video_0/000001.jpg
++        parts = imgname.split('/')
++        if len(parts) == 4:
++            subject, sequence, video, frame_file = parts
++            video_key = f"{subject}/{sequence}/{video}"
++            
++            # Extract frame number (1-indexed in filename, convert to 0-indexed for video)
++            frame_num = int(frame_file.split('.')[0]) - 1
++            
++            if video_key not in video_frames:
++                video_frames[video_key] = []
++            video_frames[video_key].append(frame_num)
++    
++    print(f"Processing {len(video_frames)} unique videos")
++    
++    # Define source and destination directories
++    source_dir = 'datasets/mpi_inf_3dhp'
++    dest_dir = 'datasets/mpi_inf_3dhp_train'
++    
++    # Create the destination directory if it doesn't exist
++    os.makedirs(dest_dir, exist_ok=True)
++    
++    # Process each video with progress tracking
++    total_videos = len(video_frames)
++    processed_videos = 0
++    successful_videos = 0
++    failed_videos = []
++    
++    for video_key, frame_indices in video_frames.items():
++        parts = video_key.split('/')
++        subject, sequence, video = parts
++        
++        # Construct source video path
++        video_file = f"{video}.avi"
++        video_source_path = os.path.join(source_dir, subject, sequence, 'imageSequence', video_file)
++        
++        # Construct destination directory
++        video_dest_dir = os.path.join(dest_dir, subject, sequence, video)
++        
++        processed_videos += 1
++        progress_pct = int((processed_videos / total_videos) * 100)
++        
++        if os.path.exists(video_source_path):
++            # Check if this video has already been processed
++            expected_frames = set(f"{idx+1:06d}.jpg" for idx in frame_indices)
++            existing_frames = set()
++            
++            if os.path.exists(video_dest_dir):
++                existing_frames = set(f for f in os.listdir(video_dest_dir) if f.endswith('.jpg'))
++            
++            missing_frames = expected_frames - existing_frames
++            
++            if not missing_frames:
++                print(f"[{processed_videos}/{total_videos} - {progress_pct}%] ✓ Skipping {video_key} - already completed ({len(frame_indices)} frames)")
++                successful_videos += 1
++            else:
++                print(f"[{processed_videos}/{total_videos} - {progress_pct}%] Processing {video_key} ({len(missing_frames)}/{len(frame_indices)} frames remaining)")
++                try:
++                    # Extract only missing frames
++                    missing_frame_indices = [int(f.split('.')[0]) - 1 for f in missing_frames]
++                    success = extract_specific_frames(video_source_path, video_dest_dir, missing_frame_indices)
++                    if success:
++                        successful_videos += 1
++                    else:
++                        failed_videos.append(video_key)
++                        print(f"    Failed to extract frames from {video_key}")
++                except Exception as e:
++                    failed_videos.append(video_key)
++                    print(f"    Exception while processing {video_key}: {str(e)}")
++        else:
++            failed_videos.append(video_key)
++            print(f"[{processed_videos}/{total_videos} - {progress_pct}%] Warning: Video not found: {video_source_path}")
++    
++    print(f"\nSelective frame extraction completed!")
++    print(f"Successfully processed: {successful_videos}/{total_videos} videos")
++    if failed_videos:
++        print(f"Failed videos ({len(failed_videos)}):")
++        for failed_video in failed_videos:
++            print(f"  - {failed_video}")
++    else:
++        print("All videos processed successfully!")
++
++if __name__ == "__main__":
++    process_mpi_inf_3dhp_selective()
+\ No newline at end of file
+diff --git a/preprocess_data/mpi_inf_3dhp.py b/preprocess_data/mpi_inf_3dhp.py
+index a17b27f..9981771 100644
+--- a/preprocess_data/mpi_inf_3dhp.py
++++ b/preprocess_data/mpi_inf_3dhp.py
+@@ -2,10 +2,10 @@ import shutil
+ import numpy as np
+ import os
+ 
+-data = np.load("datasets/mpi_inf_3dhp/mpi_inf_3dhp_train.npz")
++data = np.load("/mnt/disk1/Data/6000ada_backup/DATADRIVE1/mesh_maker/VQ-HPS/datasets/mpi_inf_3dhp/mpi_inf_3dhp_train.npz")
+ 
+ for imgname in data["imgname"]:
+-    dest_fpath = f"datasets/mpi_inf_3dhp/mpi_inf_3dhp_train/{imgname}"
++    dest_fpath = f"/mnt/disk1/Data/6000ada_backup/DATADRIVE1/mesh_maker/VQ-HPS/datasets/mpi_inf_3dhp/mpi_inf_3dhp_train/{imgname}"
+     os.makedirs(os.path.dirname(dest_fpath), exist_ok=True)
+     shutil.copyfile(
+         f"/media/fast/LaCie/data/video_datasets/mpi_inf_3dhp/{imgname}",
+diff --git a/preprocess_data/threedpw.py b/preprocess_data/threedpw.py
+index e357eac..0fb5ef3 100644
+--- a/preprocess_data/threedpw.py
++++ b/preprocess_data/threedpw.py
+@@ -149,6 +149,6 @@ def read_smpl_data(folder, set):
+     )
+ 
+ 
+-read_smpl_data("datasets/3DPW", "test")
+-read_smpl_data("datasets/3DPW", "validation")
+-read_smpl_data("datasets/3DPW", "train")
++read_smpl_data("/mnt/disk1/Data/6000ada_backup/DATADRIVE1/mesh_maker/VQ-HPS/datasets/3DPW", "test")
++read_smpl_data("/mnt/disk1/Data/6000ada_backup/DATADRIVE1/mesh_maker/VQ-HPS/datasets/3DPW", "validation")
++read_smpl_data("/mnt/disk1/Data/6000ada_backup/DATADRIVE1/mesh_maker/VQ-HPS/datasets/3DPW", "train")
+diff --git a/test_mesh_regressor.py b/test_mesh_regressor.py
+index c2fd5bf..0a006d4 100644
+--- a/test_mesh_regressor.py
++++ b/test_mesh_regressor.py
+@@ -54,7 +54,7 @@ def main(cfg: DictConfig):
+         p.numel() for p in mesh_regressor.parameters() if p.requires_grad
+     )
+     print(f"Total parameters: {pytorch_total_params}")
+-    mesh_regressor.load("checkpoint/MESH_REGRESSOR/vqhps_hrnet")
++    mesh_regressor.load("checkpoint/MESH_REGRESSOR/2025-12-19/18-59/model_best_pampjpe")
+ 
+     """Joint regressor"""
+     J_regressor = torch.from_numpy(np.load("body_models/J_regressor_h36m.npy")).float()
+diff --git a/train_mesh_regressor.py b/train_mesh_regressor.py
+index 21916b5..62c1340 100644
+--- a/train_mesh_regressor.py
++++ b/train_mesh_regressor.py
+@@ -46,6 +46,7 @@ def main(cfg: DictConfig):
+         augment=False,
+         proportion=0.1,
+     )
++    # validation_data = None
+ 
+     """ ConvMesh VQVAE model """
+     convmesh_model = FullyConvAE(cfg.modelconv, test_mode=True)
+diff --git a/vq_hps/data/dataset_hmr.py b/vq_hps/data/dataset_hmr.py
+index 1b350fe..8a097a5 100644
+--- a/vq_hps/data/dataset_hmr.py
++++ b/vq_hps/data/dataset_hmr.py
+@@ -141,32 +141,56 @@ class DatasetHMR(Dataset):
+         """Process the image"""
+         if self.is_train:
+             aug_comp = [
+-                A.Downscale(0.5, 0.9, interpolation=0, p=0.1),
+-                A.ImageCompression(20, 100, p=0.1),
+-                A.RandomRain(blur_value=4, p=0.1),
++                A.Downscale(
++                    scale_range=(0.5, 0.9),  # tuple 필수
++                    # v2는 dict 형태의 interpolation_pair 사용 (업스케일/다운스케일 별도 지정)
++                    interpolation_pair={"downscale": cv2.INTER_NEAREST, "upscale": cv2.INTER_NEAREST},
++                    p=0.1,
++                ),
++                A.ImageCompression(
++                    quality_range=(20, 100),  # tuple 필수
++                    compression_type="jpeg",  # "jpeg" 또는 "webp"
++                    p=0.1,
++                ),
++                # 이하 변환들은 v2에서도 그대로 키워드 인자만 잘 맞추면 됩니다.
++                A.RandomRain(
++                    blur_value=4,
++                    p=0.1,
++                    # 필요 시 다음 옵션도 사용 가능:
++                    # slant_lower=-10, slant_upper=10, drop_length=20, drop_width=1, brightness_coefficient=0.9
++                ),
+                 A.MotionBlur(blur_limit=(3, 15), p=0.2),
+                 A.Blur(blur_limit=(3, 10), p=0.1),
+                 A.RandomSnow(
+-                    brightness_coeff=1.5, snow_point_lower=0.2, snow_point_upper=0.4
++                    brightness_coeff=1.5,
++                    snow_point_range=(0.2,0.4),
++                    p=0.0,  # 항상 적용이 아니라면 p 명시 (원 코드에 p가 없었으면 기본 0.5)
+                 ),
+             ]
++
+             aug_mod = [
+-                A.CLAHE((1, 11), (10, 10), p=0.2),
++                A.CLAHE(
++                    clip_limit=(1, 11),  # tuple 허용
++                    tile_grid_size=(10, 10),
++                    p=0.2,
++                ),
+                 A.ToGray(p=0.2),
+                 A.RandomBrightnessContrast(p=0.2),
+                 A.MultiplicativeNoise(
+-                    multiplier=[0.5, 1.5], elementwise=False, per_channel=True, p=0.2
++                    multiplier=(0.5, 1.5),  # list도 되지만 tuple 권장
++                    elementwise=False,
++                    per_channel=True,
++                    p=0.2,
+                 ),
+                 A.HueSaturationValue(
+-                    hue_shift_limit=20,
++                    hue_shift_limit=20,  # 또는 (low, high)
+                     sat_shift_limit=30,
+                     val_shift_limit=20,
+-                    always_apply=False,
+                     p=0.2,
+                 ),
+-                A.Posterize(p=0.1),
++                A.Posterize(p=0.1),  # 기본 num_bits=4, 필요 시 num_bits= 지정
+                 A.RandomGamma(gamma_limit=(80, 200), p=0.1),
+-                A.Equalize(mode="cv", p=0.1),
++                A.Equalize(mode="cv", p=0.1),  # "cv" 또는 "pil"
+             ]
+             albumentation_aug = A.Compose(
+                 [A.OneOf(aug_comp, p=0.3), A.OneOf(aug_mod, p=0.3)]
+diff --git a/vq_hps/model/__init__.py b/vq_hps/model/__init__.py
+index bfe168a..6e4d345 100644
+--- a/vq_hps/model/__init__.py
++++ b/vq_hps/model/__init__.py
+@@ -1 +1,2 @@
+-from .mesh_regressor import MeshRegressor
++from .mesh_regressor_dino import MeshRegressor
++# from .mesh_regressor import MeshRegressor
+diff --git a/vq_hps/model/mesh_regressor/mesh_predictor.py b/vq_hps/model/mesh_regressor/mesh_predictor.py
+index 341ff7c..402ee10 100644
+--- a/vq_hps/model/mesh_regressor/mesh_predictor.py
++++ b/vq_hps/model/mesh_regressor/mesh_predictor.py
+@@ -126,8 +126,8 @@ class MeshRegressor(nn.Module):
+         xc = self.fc2(xc)
+         xc = self.drop2(xc)
+ 
+-        pred_rot = self.rot_predictor(xc)
+-        pred_cam = self.cam_predictor(xc).view(-1, 3).cpu()
++        pred_rot = self.rot_predictor(xc) # b, 6
++        pred_cam = self.cam_predictor(xc).view(-1, 3).cpu()  # b, 3
+ 
+         # Mesh logit prediction
+         mesh_tokens = self.mesh_token_embed.weight.unsqueeze(1).repeat(
+@@ -135,7 +135,7 @@ class MeshRegressor(nn.Module):
+         )
+         raw_img_features = self.backbone_pose(img)
+         _, _, h, w = raw_img_features.shape
+-        img_features_pose = self.conv_1x1(raw_img_features).flatten(2).permute(2, 0, 1)
++        img_features_pose = self.conv_1x1(raw_img_features).flatten(2).permute(2, 0, 1) # transformer_dim, b , hxw
+ 
+         pos_enc = (
+             self.position_encoding(
+@@ -148,18 +148,18 @@ class MeshRegressor(nn.Module):
+             .permute(2, 0, 1)
+         )
+ 
+-        _, mesh_features = self.transformer(img_features_pose, mesh_tokens, pos_enc)
++        _, mesh_features = self.transformer(img_features_pose, mesh_tokens, pos_enc)   # transformer_dim, b, hxw
+ 
+         if self.autoreg:
+-            mesh_logits = mesh_features.transpose(0, 1)
++            mesh_logits = mesh_features.transpose(0, 1)  # h,w,transformer_dim
+         else:
+-            mesh_features = mesh_features.transpose(0, 1)
++            mesh_features = mesh_features.transpose(0, 1)  # b,h*w,transformer_dim
+ 
+-            pred_rot_features = pred_rot.unsqueeze(1).repeat(1, 54, 1).to(mesh_features)
+-            pred_cam_features = pred_cam.unsqueeze(1).repeat(1, 54, 1).to(mesh_features)
++            pred_rot_features = pred_rot.unsqueeze(1).repeat(1, 54, 1).to(mesh_features) # b, 54, 6
++            pred_cam_features = pred_cam.unsqueeze(1).repeat(1, 54, 1).to(mesh_features) # b, 54, 3
+             concat_features = torch.cat(
+                 [mesh_features, pred_rot_features, pred_cam_features], dim=-1
+-            )
++            )  # b, transformer_dim, hxw + 2
+ 
+             mesh_logits = self.indices_regressor(
+                 concat_features
+diff --git a/vq_hps/model/mesh_regressor_dino/__init__.py b/vq_hps/model/mesh_regressor_dino/__init__.py
+new file mode 100755
+index 0000000..cac1398
+--- /dev/null
++++ b/vq_hps/model/mesh_regressor_dino/__init__.py
+@@ -0,0 +1,2 @@
++# from .mesh_predictor_transformer import MeshRegressor # 1
++from .mesh_predictor_cnn import MeshRegressor # 2
+diff --git a/vq_hps/model/mesh_regressor_dino/mesh_predictor_cnn.py b/vq_hps/model/mesh_regressor_dino/mesh_predictor_cnn.py
+new file mode 100755
+index 0000000..4a10a61
+--- /dev/null
++++ b/vq_hps/model/mesh_regressor_dino/mesh_predictor_cnn.py
+@@ -0,0 +1,202 @@
++"""Implements VQ-HPS"""
++
++from __future__ import absolute_import, division, print_function
++import torch
++from torch import nn
++import torchvision.models as models
++from .transformer import build_transformer
++from .positional_encoding import build_position_encoding
++import json
++import math
++from ..backbone.hrnet import hrnet_w48
++from pytorch3d.transforms import rotation_6d_to_matrix
++from collections import OrderedDict
++
++dino_dims = {"dinov3_vith16plus":1280,
++             "dinov3_vitl16":1024}
++class MeshRegressor(nn.Module):
++    """FastMETRO for 3D human pose and mesh reconstruction from a single RGB image"""
++
++    def __init__(
++        self,
++        cfg,
++        backbone,
++        backbone_version="dinov3_vitl16",
++        backbone_location="",
++        num_vertex=54,
++        seq_len=49,
++        autoreg=True,
++    ):
++        """
++        Parameters:
++            - args: Arguments
++            - backbone: CNN Backbone used to extract image features from the given image
++            - mesh_sampler: Mesh Sampler used in the coarse-to-fine mesh upsampling
++            - num_joints: The number of joint tokens used in the transformer decoder
++            - num_vertices: The number of vertex tokens used in the transformer decoder
++        """
++        super().__init__()
++
++        self.autoreg = autoreg
++
++        # configurations for the transformer
++        with open(cfg) as f:
++            data = f.read()
++        self.transformer_config = json.loads(data)
++
++        # build transformer
++        self.transformer = build_transformer(
++            self.transformer_config, autoreg=self.autoreg
++        )
++        self.model_dim = self.transformer_config["model_dim"]
++        self.seq_len = seq_len
++
++        # token embeddings
++        self.mesh_token_embed = nn.Embedding(num_vertex, self.model_dim)  # verts
++        if backbone_version.split("_")[0] == "dinov3":
++            self.dinov3 = torch.hub.load(
++                repo_or_dir=backbone_location,
++                model=backbone_version,
++                source="local",
++                pretrained=True,
++                weights="dinov3_vitl16_pretrain_lvd1689m-8aa4cbdd.pth",
++                check_hash=False,
++            )
++            self.img_dim = dino_dims[backbone_version]
++
++        self.conv_1x1 = nn.Conv2d(
++            self.img_dim, self.transformer_config["model_dim"], kernel_size=1
++        )
++
++        # positional encodings
++        self.position_encoding = build_position_encoding(
++            pos_type="sine",
++            hidden_dim=self.model_dim,
++        )
++
++        # if not autoreg:
++        # self.indices_regressor = nn.Linear(self.model_dim + 9, 512)
++
++        self.pose_dim = 17 * 3
++        self.avgpool = nn.AdaptiveAvgPool2d(1)
++        self.fc1 = nn.Linear(self.img_dim + self.pose_dim, 1024)
++        self.drop1 = nn.Dropout()
++        self.fc2 = nn.Linear(1024, 1024)
++        self.drop2 = nn.Dropout()
++        self.rot_predictor = nn.Linear(1024, 6)
++        self.cam_predictor = nn.Linear(1024, 3)
++        self.embed_transform = EmbedTransform(self.model_dim)
++
++    def forward(
++        self,
++        img,
++        pose_init=None,
++        mesh_decoder=None,
++        joints_reg=None,
++    ):
++        device = img.device
++        batch_size = img.size(0)
++
++        # Rotation and camera prediction
++        with torch.no_grad():
++            dino_out = self.dinov3.get_intermediate_layers(img, n=23, reshape=True, norm=True) # dino_out (1, 1024, h/16, w/16)
++        xc = self.avgpool(dino_out[-1])
++        xc = xc.view(xc.size(0), -1)
++
++
++        xc = torch.cat([xc, pose_init], 1)
++        xc = self.fc1(xc)
++        xc = self.drop1(xc)
++        xc = self.fc2(xc)
++        xc = self.drop2(xc)
++
++
++        pred_rot = self.rot_predictor(xc)
++        pred_cam = self.cam_predictor(xc)
++
++        img_features_pose = self.embed_transform(dino_out[-1]) # (b, 54, dim)
++
++        if self.autoreg:
++            mesh_logits = img_features_pose  # h,w,transformer_dim
++        else:
++
++            pred_rot_features = pred_rot.unsqueeze(1).repeat(1, 54, 1).to(img_features_pose) # b, 54, 6
++            pred_cam_features = pred_cam.unsqueeze(1).repeat(1, 54, 1).to(img_features_pose) # b, 54, 3
++            concat_features = torch.cat(
++                [img_features_pose, pred_rot_features, pred_cam_features], dim=-1
++            )  # b, transformer_dim, hxw + 2
++
++            mesh_logits = self.indices_regressor(
++                concat_features
++            )  # batch_size X num_vertices X 1
++        # mesh_logits = concat_features.transpose(0, 1)  # h,w,transformer_dim
++        # mesh_logits = self.indices_regressor(
++        #     concat_features
++        # )  # batch_size X num_vertices X 1
++        #
++        # mesh_indices = torch.argmax(mesh_logits, dim=-1)
++        mesh_indices = torch.argmax(mesh_logits, dim=-1)
++        with torch.no_grad():
++            mesh_canonical = mesh_decoder.decode(mesh_indices)
++        rotmat = rotation_6d_to_matrix(pred_rot)
++        pred_v = (rotmat @ mesh_canonical.transpose(2, 1)).transpose(2, 1)
++        J_regressor_batch = (
++            joints_reg[None, :].expand(pred_v.shape[0], -1, -1).to(pred_v)
++        )
++        pose_init = torch.matmul(J_regressor_batch, pred_v).reshape(-1, 51)
++
++        out = {}
++        out["prob_indices"] = mesh_logits.cpu()
++        out["pred_indices"] = mesh_indices.cpu()
++        out["pred_mesh_canonical"] = mesh_canonical.cpu()
++        out["pred_mesh"] = pred_v.cpu()
++        out["pred_rot"] = pred_rot.cpu()
++        out["pred_cam"] = pred_cam.cpu()
++
++        return out
++
++    def load(self, path_model: str):
++        checkpoint = torch.load(path_model)
++        new_state_dict = OrderedDict()
++        for k, v in checkpoint["model"].items():
++            if "module" in k:
++                name = k[7:]  # remove `module.`
++            else:
++                name = k
++            if "rotcam_feat" not in k:
++                new_state_dict[name] = v
++        self.load_state_dict(new_state_dict)
++        loss = checkpoint["loss"]
++        print(f"\t [Mesh regressor is loaded successfully with loss = {loss}]")
++
++class EmbedTransform(nn.Module):
++    def __init__(self, model_dim):
++        super().__init__()
++        self.conv_block = nn.Sequential(nn.Conv2d(model_dim, 512, kernel_size=3, stride=1, padding=1),
++                                          nn.BatchNorm2d(512),
++                                          nn.ReLU(inplace=True))
++        self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2) # 512 x 7 x 7
++        self.linear_block1 = nn.Sequential(nn.Linear(7*7, 7*7),
++                                           nn.LayerNorm(7*7),
++                                           nn.ReLU(inplace=True),
++                                           nn.Dropout(0.5))
++        self.linear_block2 = nn.Sequential(nn.Linear(512, 512),
++                                           nn.LayerNorm(512),
++                                           nn.ReLU(inplace=True),
++                                           nn.Dropout(0.5))
++        self.linear_block3 = nn.Sequential(nn.Linear(7*7, 9*6),
++                                           nn.LayerNorm(9*6),
++                                           nn.ReLU(inplace=True),
++                                           nn.Dropout(0.5))
++
++    def forward(self, x):
++        x = self.conv_block(x) # b, model_dim, 14, 14 -> b , 512, 14, 14
++        x = self.maxpool(x) # b, 512, 14, 14 -> b , 512, 7, 7
++        x = x.view(x.shape[0], x.shape[1], 7*7) # b , 512, 7, 7 -> b, 512, 7*7
++        x = self.linear_block1(x) # b, 512, 7*7 -> b, 512, 7*7
++        x = x.permute(0, 2, 1) # b, 512 , 16x16 -> b, 16x16, 512
++        x = self.linear_block2(x) # b, 16x16, 512 -> b, 16x16, 512
++        x = x.permute(0, 2, 1) # b, 16x16, 512 -> b, 512, 16x16
++        x = self.linear_block3(x) # b, b, 512, 16*16 -> b, 512, 9 x 6
++
++        return x.permute(0,2,1)
+\ No newline at end of file
+diff --git a/vq_hps/model/mesh_regressor_dino/mesh_predictor_transformer.py b/vq_hps/model/mesh_regressor_dino/mesh_predictor_transformer.py
+new file mode 100755
+index 0000000..ad28a2c
+--- /dev/null
++++ b/vq_hps/model/mesh_regressor_dino/mesh_predictor_transformer.py
+@@ -0,0 +1,192 @@
++"""Implements VQ-HPS"""
++
++from __future__ import absolute_import, division, print_function
++import torch
++from torch import nn
++from torch import nn
++import torchvision.models as models
++from .transformer import build_transformer
++from .positional_encoding import build_position_encoding
++import json
++import math
++from ..backbone.hrnet import hrnet_w48
++from pytorch3d.transforms import rotation_6d_to_matrix
++from collections import OrderedDict
++
++dino_dims = {"dinov3_vith16plus":1280,
++             "dinov3_vitl16":1024}
++class MeshRegressor(nn.Module):
++    """FastMETRO for 3D human pose and mesh reconstruction from a single RGB image"""
++
++    def __init__(
++        self,
++        cfg,
++        backbone="dinov3_vitl16",
++        num_vertex=54,
++        seq_len=49,
++        autoreg=True,
++    ):
++        """
++        Parameters:
++            - args: Arguments
++            - backbone: CNN Backbone used to extract image features from the given image
++            - mesh_sampler: Mesh Sampler used in the coarse-to-fine mesh upsampling
++            - num_joints: The number of joint tokens used in the transformer decoder
++            - num_vertices: The number of vertex tokens used in the transformer decoder
++        """
++        super().__init__()
++
++        self.autoreg = autoreg
++
++        # configurations for the transformer
++        with open(cfg) as f:
++            data = f.read()
++        self.transformer_config = json.loads(data)
++
++        # build transformer
++        self.transformer = build_transformer(
++            self.transformer_config, autoreg=self.autoreg
++        )
++
++        self.seq_len = seq_len
++
++
++        # backbone
++        self.backbone = backbone
++        # if backbone.split('_')[0] == "dinov3":
++
++        self.dinov3 = torch.hub.load(
++            repo_or_dir="",
++            model="dinov3_vitl16",
++            source="local",
++            pretrained=True,
++            weights="dinov3_vitl16_pretrain_lvd1689m-8aa4cbdd.pth",
++            check_hash=False,
++        )
++        self.model_dim = dino_dims[backbone]
++
++        # token embeddings
++        self.mesh_token_embed = nn.Embedding(num_vertex, self.model_dim)  # verts
++
++
++
++        self.conv_1x1 = nn.Conv2d(
++            self.model_dim, self.transformer_config["model_dim"], kernel_size=1
++        )
++
++
++        # positional encodings
++        self.position_encoding = build_position_encoding(
++            pos_type="sine",
++            hidden_dim=self.model_dim,
++        )
++
++        if not autoreg:
++            self.indices_regressor = nn.Linear(self.model_dim + 9, 512)
++
++        self.pose_dim = 17 * 3
++        self.avgpool = nn.AdaptiveAvgPool2d(1)
++        self.fc1 = nn.Linear(self.model_dim + self.pose_dim, 1024)
++        self.drop1 = nn.Dropout()
++        self.fc2 = nn.Linear(1024, 1024)
++        self.drop2 = nn.Dropout()
++        self.rot_predictor = nn.Linear(1024, 6)
++        self.cam_predictor = nn.Linear(1024, 3)
++
++    def forward(
++        self,
++        img,
++        pose_init=None,
++        mesh_decoder=None,
++        joints_reg=None,
++    ):
++        device = img.device
++        batch_size = img.size(0)
++
++        # Rotation and camera prediction
++        with torch.no_grad():
++            dino_out = self.dinov3.get_intermediate_layers(img, n=23, reshape=True, norm=True)
++        img_enc = self.avgpool(dino_out[-1])
++
++
++        img_enc = img_enc.view(img_enc.size(0), -1)
++
++        xc = torch.cat([img_enc, pose_init], 1)
++
++        xc = self.fc1(xc)
++        xc = self.drop1(xc)
++        xc = self.fc2(xc)
++        xc = self.drop2(xc)
++
++        pred_rot = self.rot_predictor(xc) # b, 6
++        pred_cam = self.cam_predictor(xc).view(-1, 3).cpu()  # b, 3
++
++        # Mesh logit prediction
++        mesh_tokens = self.mesh_token_embed.weight.unsqueeze(1).repeat(
++            (1, batch_size, 1)
++        )
++        raw_img_features = dino_out[-1]
++        _, _, h, w = raw_img_features.shape
++        img_features_pose = self.conv_1x1(raw_img_features).flatten(2).permute(2, 0, 1) # transformer_dim, b , hxw
++
++        pos_enc = (
++            self.position_encoding(
++                batch_size,
++                h,
++                w,
++                device,
++            )
++            .flatten(2)
++            .permute(2, 0, 1)
++        )
++
++        _, mesh_features = self.transformer(img_features_pose, mesh_tokens, pos_enc)   # transformer_dim, b, hxw
++
++        if self.autoreg:
++            mesh_logits = mesh_features.transpose(0, 1)  # h,w,transformer_dim
++        else:
++            mesh_features = mesh_features.transpose(0, 1)  # b,h*w,transformer_dim
++
++            pred_rot_features = pred_rot.unsqueeze(1).repeat(1, 54, 1).to(mesh_features) # b, 54, 6
++            pred_cam_features = pred_cam.unsqueeze(1).repeat(1, 54, 1).to(mesh_features) # b, 54, 3
++            concat_features = torch.cat(
++                [mesh_features, pred_rot_features, pred_cam_features], dim=-1
++            )  # b, transformer_dim, hxw + 2
++
++            mesh_logits = self.indices_regressor(
++                concat_features
++            )  # batch_size X num_vertices X 1
++
++        mesh_indices = torch.argmax(mesh_logits, dim=-1)
++        with torch.no_grad():
++            mesh_canonical = mesh_decoder.decode(mesh_indices)
++        rotmat = rotation_6d_to_matrix(pred_rot)
++        pred_v = (rotmat @ mesh_canonical.transpose(2, 1)).transpose(2, 1)
++        J_regressor_batch = (
++            joints_reg[None, :].expand(pred_v.shape[0], -1, -1).to(pred_v)
++        )
++        pose_init = torch.matmul(J_regressor_batch, pred_v).reshape(-1, 51)
++
++        out = {}
++        out["prob_indices"] = mesh_logits.cpu()
++        out["pred_indices"] = mesh_indices.cpu()
++        out["pred_mesh_canonical"] = mesh_canonical.cpu()
++        out["pred_mesh"] = pred_v.cpu()
++        out["pred_rot"] = pred_rot.cpu()
++        out["pred_cam"] = pred_cam.cpu()
++
++        return out
++
++    def load(self, path_model: str):
++        checkpoint = torch.load(path_model)
++        new_state_dict = OrderedDict()
++        for k, v in checkpoint["model"].items():
++            if "module" in k:
++                name = k[7:]  # remove `module.`
++            else:
++                name = k
++            if "rotcam_feat" not in k:
++                new_state_dict[name] = v
++        self.load_state_dict(new_state_dict)
++        loss = checkpoint["loss"]
++        print(f"\t [Mesh regressor is loaded successfully with loss = {loss}]")
+\ No newline at end of file
+diff --git a/vq_hps/model/mesh_regressor_dino/positional_encoding.py b/vq_hps/model/mesh_regressor_dino/positional_encoding.py
+new file mode 100755
+index 0000000..e6b9cf8
+--- /dev/null
++++ b/vq_hps/model/mesh_regressor_dino/positional_encoding.py
+@@ -0,0 +1,65 @@
++# ----------------------------------------------------------------------------------------------
++# FastMETRO Official Code
++# Copyright (c) POSTECH Algorithmic Machine Intelligence Lab. (P-AMI Lab.) All Rights Reserved
++# Licensed under the MIT license.
++# ----------------------------------------------------------------------------------------------
++# Modified from DETR (https://github.com/facebookresearch/detr)
++# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved [see https://github.com/facebookresearch/detr/blob/main/LICENSE for details]
++# ----------------------------------------------------------------------------------------------
++
++import math
++import torch
++from torch import nn
++
++
++class PositionEmbeddingSine(nn.Module):
++    """
++    This is a more standard version of the position embedding, very similar to the one
++    used by the Attention is all you need paper, generalized to work on images.
++    """
++
++    def __init__(
++        self, num_pos_feats=64, temperature=10000, normalize=False, scale=None
++    ):
++        super().__init__()
++        self.num_pos_feats = num_pos_feats
++        self.temperature = temperature
++        self.normalize = normalize
++        if scale is not None and normalize is False:
++            raise ValueError("normalize should be True if scale is passed")
++        if scale is None:
++            scale = 2 * math.pi
++        self.scale = scale
++
++    def forward(self, bs, h, w, device):
++        ones = torch.ones((bs, h, w), dtype=torch.bool, device=device)
++        y_embed = ones.cumsum(1, dtype=torch.float32)
++        x_embed = ones.cumsum(2, dtype=torch.float32)
++        if self.normalize:
++            eps = 1e-6
++            y_embed = y_embed / (y_embed[:, -1:, :] + eps) * self.scale
++            x_embed = x_embed / (x_embed[:, :, -1:] + eps) * self.scale
++
++        dim_t = torch.arange(self.num_pos_feats, dtype=torch.float32, device=device)
++        dim_t = self.temperature ** (2 * (dim_t // 2) / self.num_pos_feats)
++
++        pos_x = x_embed[:, :, :, None] / dim_t
++        pos_y = y_embed[:, :, :, None] / dim_t
++        pos_x = torch.stack(
++            (pos_x[:, :, :, 0::2].sin(), pos_x[:, :, :, 1::2].cos()), dim=4
++        ).flatten(3)
++        pos_y = torch.stack(
++            (pos_y[:, :, :, 0::2].sin(), pos_y[:, :, :, 1::2].cos()), dim=4
++        ).flatten(3)
++        pos = torch.cat((pos_y, pos_x), dim=3).permute(0, 3, 1, 2)
++        return pos
++
++
++def build_position_encoding(pos_type, hidden_dim):
++    N_steps = hidden_dim // 2
++    if pos_type == "sine":
++        position_embedding = PositionEmbeddingSine(N_steps, normalize=True)
++    else:
++        raise ValueError("not supported {pos_type}")
++
++    return position_embedding
+diff --git a/vq_hps/model/mesh_regressor_dino/transformer.py b/vq_hps/model/mesh_regressor_dino/transformer.py
+new file mode 100755
+index 0000000..d65158e
+--- /dev/null
++++ b/vq_hps/model/mesh_regressor_dino/transformer.py
+@@ -0,0 +1,387 @@
++"""Inspired and adapted from FastMETRO (https://github.com/postech-ami/FastMETRO/blob/main/src/modeling/model/transformer.py) 
++and T2MGPT (https://github.com/Mael-zys/T2M-GPT/blob/main/models/t2m_trans.py)"""
++
++import copy
++import torch
++import torch.nn.functional as F
++from typing import Optional
++from torch import nn, Tensor
++import math
++
++
++class Transformer(nn.Module):
++    """Transformer encoder-decoder"""
++
++    def __init__(
++        self,
++        model_dim=512,
++        nhead=8,
++        num_enc_layers=3,
++        num_dec_layers=3,
++        feedforward_dim=2048,
++        dropout=0.1,
++        activation="relu",
++        dict_size=512,
++        block_size=103,
++        autoreg=True,
++    ):
++        """
++        Parameters:
++            - model_dim: The hidden dimension size in the transformer architecture
++            - nhead: The number of attention heads in the attention modules
++            - num_enc_layers: The number of encoder layers in the transformer encoder
++            - num_dec_layers: The number of decoder layers in the transformer decoder
++            - feedforward_dim: The hidden dimension size in MLP
++            - dropout: The dropout rate in the transformer architecture
++            - activation: The activation function used in MLP
++            - dict_size: The number of vectors in the Mesh-VQ-VAE codebook (Only used if autoreg is True)
++            - block_size: The total number of elements for the decoder (img + camrot + mesh) (Only used if autoreg is True)
++        """
++        super().__init__()
++        self.model_dim = model_dim
++        self.nhead = nhead
++
++        # transformer encoder
++        encoder_layer = TransformerEncoderLayer(
++            model_dim, nhead, feedforward_dim, dropout, activation
++        )
++        encoder_norm = nn.LayerNorm(model_dim)
++        self.encoder = TransformerEncoder(encoder_layer, num_enc_layers, encoder_norm)
++
++        # transformer decoder
++        decoder_layer = TransformerDecoderLayer(
++            model_dim, nhead, feedforward_dim, dropout, activation
++        )
++        decoder_norm = nn.LayerNorm(model_dim)
++        self.decoder = TransformerDecoder(decoder_layer, num_dec_layers, decoder_norm)
++
++        self.autoreg = autoreg
++        if autoreg:
++            self.dec_head = CrossCondTransHead(
++                dict_size,
++                model_dim,
++                block_size,
++                num_dec_layers,
++                nhead,
++                dropout,
++                feedforward_dim,
++            )
++
++        self._reset_parameters()
++
++    def _reset_parameters(self):
++        for p in self.parameters():
++            if p.dim() > 1:
++                nn.init.xavier_uniform_(p)
++
++    def forward(self, img_features, mesh_tokens, pos_embed):
++
++        # Transformer Encoder
++        enc_img_features = self.encoder(
++            img_features, pos=pos_embed
++        )  # (1 + height * width) X batch_size X feature_dim
++
++        # Transformer Decoder
++        zero_tgt = torch.zeros_like(mesh_tokens)  # num_mesh X batch_size X feature_dim
++        mesh_features = self.decoder(
++            mesh_tokens,
++            enc_img_features,
++            pos=pos_embed,
++            query_pos=zero_tgt,
++        )  # num_mesh X batch_size X feature_dim
++
++        if not self.autoreg:
++            return enc_img_features, mesh_features
++
++        mesh_logits = self.dec_head(mesh_features)
++
++        return enc_img_features, mesh_logits
++
++
++class TransformerEncoder(nn.Module):
++    """Transformer encoder"""
++
++    def __init__(self, encoder_layer, num_layers, norm=None):
++        super().__init__()
++        self.num_layers = num_layers
++        self.norm = norm
++        self.layers = _get_clones(encoder_layer, num_layers)
++
++    def forward(
++        self,
++        src,
++        pos: Optional[Tensor] = None,
++    ):
++        output = src
++
++        for layer in self.layers:
++            output = layer(
++                output,
++                pos=pos,
++            )
++
++        if self.norm is not None:
++            output = self.norm(output)
++
++        return output
++
++
++class TransformerDecoder(nn.Module):
++    """Transformer decoder"""
++
++    def __init__(self, decoder_layer, num_layers, norm=None):
++        super().__init__()
++        self.num_layers = num_layers
++        self.norm = norm
++        self.layers = _get_clones(decoder_layer, num_layers)
++
++    def forward(
++        self,
++        tgt,
++        memory,
++        pos: Optional[Tensor] = None,
++        query_pos: Optional[Tensor] = None,
++    ):
++        output = tgt
++
++        for layer in self.layers:
++            output = layer(
++                output,
++                memory,
++                pos=pos,
++                query_pos=query_pos,
++            )
++
++        if self.norm is not None:
++            output = self.norm(output)
++
++        return output
++
++
++class TransformerEncoderLayer(nn.Module):
++    """Transformer encoder layer"""
++
++    def __init__(
++        self, model_dim, nhead, feedforward_dim=2048, dropout=0.1, activation="relu"
++    ):
++        super().__init__()
++        self.self_attn = nn.MultiheadAttention(model_dim, nhead, dropout=dropout)
++
++        # MLP
++        self.linear1 = nn.Linear(model_dim, feedforward_dim)
++        self.dropout = nn.Dropout(dropout)
++        self.linear2 = nn.Linear(feedforward_dim, model_dim)
++
++        # Layer Normalization & Dropout
++        self.norm1 = nn.LayerNorm(model_dim)
++        self.norm2 = nn.LayerNorm(model_dim)
++        self.dropout1 = nn.Dropout(dropout)
++        self.dropout2 = nn.Dropout(dropout)
++
++        self.activation = _get_activation_fn(activation)
++
++    def with_pos_embed(self, tensor, pos: Optional[Tensor]):
++        # tensor[0] is for a camera token (no positional encoding)
++        return tensor if pos is None else tensor + pos
++
++    def forward(
++        self,
++        src,
++        pos: Optional[Tensor] = None,
++    ):
++        src2 = self.norm1(src)
++        q = k = self.with_pos_embed(src2, pos)
++        src2 = self.self_attn(q, k, value=src2)[0]
++        src = src + self.dropout1(src2)
++        src2 = self.norm2(src)
++        src2 = self.linear2(self.dropout(self.activation(self.linear1(src2))))
++        src = src + self.dropout2(src2)
++        return src
++
++
++class TransformerDecoderLayer(nn.Module):
++    """Transformer decoder layer"""
++
++    def __init__(
++        self, model_dim, nhead, feedforward_dim=2048, dropout=0.1, activation="relu"
++    ):
++        super().__init__()
++        self.self_attn = nn.MultiheadAttention(model_dim, nhead, dropout=dropout)
++        self.multihead_attn = nn.MultiheadAttention(model_dim, nhead, dropout=dropout)
++
++        # MLP
++        self.linear1 = nn.Linear(model_dim, feedforward_dim)
++        self.dropout = nn.Dropout(dropout)
++        self.linear2 = nn.Linear(feedforward_dim, model_dim)
++
++        # Layer Normalization & Dropout
++        self.norm1 = nn.LayerNorm(model_dim)
++        self.norm2 = nn.LayerNorm(model_dim)
++        self.norm3 = nn.LayerNorm(model_dim)
++        self.dropout1 = nn.Dropout(dropout)
++        self.dropout2 = nn.Dropout(dropout)
++        self.dropout3 = nn.Dropout(dropout)
++        self.activation = _get_activation_fn(activation)
++
++    def with_pos_embed(self, tensor, pos: Optional[Tensor]):
++        return tensor if pos is None else tensor + pos
++
++    def forward(
++        self,
++        tgt,
++        memory,
++        pos: Optional[Tensor] = None,
++        query_pos: Optional[Tensor] = None,
++    ):
++        tgt2 = self.norm1(tgt)
++        q = k = self.with_pos_embed(tgt2, query_pos)
++        tgt2 = self.self_attn(q, k, value=tgt2)[0]
++        tgt = tgt + self.dropout1(tgt2)
++        tgt2 = self.norm2(tgt)
++        tgt2 = self.multihead_attn(
++            query=self.with_pos_embed(tgt2, query_pos),
++            key=self.with_pos_embed(memory, pos),
++            value=memory,
++        )[0]
++        tgt = tgt + self.dropout2(tgt2)
++        tgt2 = self.norm3(tgt)
++        tgt2 = self.linear2(self.dropout(self.activation(self.linear1(tgt2))))
++        tgt = tgt + self.dropout3(tgt2)
++        return tgt
++
++
++class CausalCrossConditionalSelfAttention(nn.Module):
++    def __init__(self, embed_dim=512, block_size=16, n_head=8, drop_out_rate=0.1):
++        super().__init__()
++        assert embed_dim % 8 == 0
++        # key, query, value projections for all heads
++        self.key = nn.Linear(embed_dim, embed_dim)
++        self.query = nn.Linear(embed_dim, embed_dim)
++        self.value = nn.Linear(embed_dim, embed_dim)
++
++        self.attn_drop = nn.Dropout(drop_out_rate)
++        self.resid_drop = nn.Dropout(drop_out_rate)
++
++        self.proj = nn.Linear(embed_dim, embed_dim)
++        # causal mask to ensure that attention is only applied to the left in the input sequence
++        self.register_buffer(
++            "mask",
++            torch.tril(torch.ones(block_size, block_size)).view(
++                1, 1, block_size, block_size
++            ),
++        )
++        self.n_head = n_head
++
++    def forward(self, x):
++        B, T, C = x.size()
++
++        # calculate query, key, values for all heads in batch and move head forward to be the batch dim
++        k = (
++            self.key(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
++        )  # (B, nh, T, hs)
++        q = (
++            self.query(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
++        )  # (B, nh, T, hs)
++        v = (
++            self.value(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
++        )  # (B, nh, T, hs)
++        # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
++        att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
++        att = att.masked_fill(self.mask[:, :, :T, :T] == 0, float("-inf"))
++        att = F.softmax(att, dim=-1)
++        att = self.attn_drop(att)
++        y = att @ v  # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
++        y = (
++            y.transpose(1, 2).contiguous().view(B, T, C)
++        )  # re-assemble all head outputs side by side
++
++        # output projection
++        y = self.resid_drop(self.proj(y))
++        return y
++
++
++class Block(nn.Module):
++    def __init__(
++        self,
++        embed_dim=512,
++        block_size=16,
++        n_head=8,
++        drop_out_rate=0.1,
++        feedforward_dim=2048,
++    ):
++        super().__init__()
++        self.ln1 = nn.LayerNorm(embed_dim)
++        self.ln2 = nn.LayerNorm(embed_dim)
++        self.attn = CausalCrossConditionalSelfAttention(
++            embed_dim, block_size, n_head, drop_out_rate
++        )
++        self.mlp = nn.Sequential(
++            nn.Linear(embed_dim, feedforward_dim),
++            nn.GELU(),
++            nn.Linear(feedforward_dim, embed_dim),
++            nn.Dropout(drop_out_rate),
++        )
++
++    def forward(self, x):
++        x = x + self.attn(self.ln1(x))
++        x = x + self.mlp(self.ln2(x))
++        return x
++
++
++class CrossCondTransHead(nn.Module):
++    def __init__(
++        self,
++        num_vq=1024,
++        embed_dim=512,
++        block_size=54,
++        num_layers=2,
++        n_head=8,
++        drop_out_rate=0.1,
++        feedforward_dim=2048,
++    ):
++        super().__init__()
++
++        self.blocks = nn.Sequential(
++            *[
++                Block(embed_dim, block_size, n_head, drop_out_rate, feedforward_dim)
++                for _ in range(num_layers)
++            ]
++        )
++        self.ln_f = nn.LayerNorm(embed_dim)
++        self.head = nn.Linear(embed_dim, num_vq, bias=False)
++        self.block_size = block_size
++
++    def forward(self, x):
++        x = self.blocks(x)
++        x = self.ln_f(x)
++        logits = self.head(x)
++        return logits
++
++
++def _get_clones(module, N):
++    return nn.ModuleList([copy.deepcopy(module) for _ in range(N)])
++
++
++def _get_activation_fn(activation):
++    """Return an activation function given a string"""
++    if activation == "relu":
++        return F.relu
++    if activation == "gelu":
++        return F.gelu
++    if activation == "glu":
++        return F.glu
++    raise RuntimeError("activation should be relu/gelu, not {activation}.")
++
++
++def build_transformer(transformer_config, autoreg=True):
++    return Transformer(
++        model_dim=transformer_config["model_dim"],
++        dropout=transformer_config["dropout"],
++        nhead=transformer_config["nhead"],
++        feedforward_dim=transformer_config["feedforward_dim"],
++        num_enc_layers=transformer_config["num_enc_layers"],
++        num_dec_layers=transformer_config["num_dec_layers"],
++        dict_size=transformer_config["dict_size"],
++        block_size=transformer_config["block_size"],
++        autoreg=autoreg,
++    )
+diff --git a/vq_hps/train/train_mesh_regressor/train.py b/vq_hps/train/train_mesh_regressor/train.py
+index 4e6c474..ec95dfc 100644
+--- a/vq_hps/train/train_mesh_regressor/train.py
++++ b/vq_hps/train/train_mesh_regressor/train.py
+@@ -118,14 +118,17 @@ class MeshRegressor_Train(Train):
+                 num_workers=config_training["workers"],
+                 drop_last=True,
+             )
+-            self.validation_loader = DataLoader(
+-                validation_data,
+-                batch_size=config_training["batch"],
+-                shuffle=True,
+-                num_workers=config_training["workers"],
+-                pin_memory=True,
+-                drop_last=True,
+-            )
++            if validation_data is not None:
++                self.validation_loader = DataLoader(
++                    validation_data,
++                    batch_size=config_training["batch"],
++                    shuffle=True,
++                    num_workers=config_training["workers"],
++                    pin_memory=True,
++                    drop_last=True,
++                )
++            else:
++                self.validation_loader = None
+ 
+         self.lr = config_training["lr"]
+ 
+diff --git a/vq_hps/utils/eval.py b/vq_hps/utils/eval.py
+index 4edb737..e56968a 100644
+--- a/vq_hps/utils/eval.py
++++ b/vq_hps/utils/eval.py
+@@ -116,6 +116,10 @@ def pa_mpjpe(gt_v, pred_v, joints_reg, reduction=True):
+ 
+ 
+ def reprojection_loss(gt_2d, pred_v, pred_cam, joints_reg):
++    # print(gt_2d.shape)
++    # print(pred_v.shape)
++    # print(pred_cam.shape)
++    # print(joints_reg.shape)
+     J_regressor_batch = joints_reg[None, :].expand(pred_v.shape[0], -1, -1).to(gt_2d)
+     pred_3dkpt = torch.matmul(J_regressor_batch, pred_v)
+     pred_2d = orthographic_projection(pred_3dkpt, pred_cam)

@@ -1,0 +1,6 @@
+quantity,value
+n_instances,35504
+pve_mean_mm,7.93
+pve_median_mm,7.66
+pve_p95_mm,10.66
+token_agreement_reencoding,0.80

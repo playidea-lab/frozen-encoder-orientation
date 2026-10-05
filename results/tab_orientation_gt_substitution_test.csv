@@ -1,0 +1,5 @@
+checkpoint,geodesic_mean_deg,geodesic_median_deg,abs_x_deg,abs_y_deg,abs_z_deg,pve_pred_mm,pve_gt_rot_mm,mpjpe_pred_mm,mpjpe_gt_rot_mm,pa_mpjpe_mm
+as_received_seed1_30ep,29.47,22.86,8.96,21.78,11.37,163.00,86.75,146.87,72.82,48.80
+as_received_long_e103,29.53,23.51,8.91,22.08,11.17,161.42,86.52,145.89,72.57,49.16
+both_fixes_frozen_seed0,11.49,10.72,5.80,7.08,3.85,91.29,85.88,78.81,72.60,49.01
+both_fixes_4_blocks_unfrozen,10.48,9.69,5.17,6.84,3.00,83.42,82.07,70.77,69.17,45.73
